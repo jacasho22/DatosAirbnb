@@ -740,7 +740,9 @@ function convertDocumentPhotosToBase64(formData) {
  * Simula el envío del formulario
  * @param {FormData} formData - Los datos del formulario
  */
-function simulateFormSubmission(formData) {
+import { saveFormToFirestore } from './firebase-config.js';
+
+async function simulateFormSubmission(formData) {
     console.log('Iniciando simulateFormSubmission');
     
     // Crear un objeto con los datos del formulario
@@ -793,83 +795,32 @@ function simulateFormSubmission(formData) {
         guestCount: submissionData.guests.length
     });
     
-    // Verificar si el formulario ya existe en localStorage para evitar duplicados
-    let existingSubmissions = [];
     try {
-        existingSubmissions = JSON.parse(localStorage.getItem('formSubmissions') || '[]');
-        // Verificar si ya existe un formulario con datos similares
-        const isDuplicate = existingSubmissions.some(submission => 
-            submission.apartment === submissionData.apartment && 
-            submission.checkInDate === submissionData.checkInDate &&
-            Math.abs(new Date(submission.submissionDate) - new Date(submissionData.submissionDate)) < 10000 // 10 segundos
-        );
-        if (isDuplicate) {
-            console.warn('Se detectó un intento de guardar un formulario duplicado. Operación cancelada.');
-            // Mostrar el modal de éxito de todos modos
-            setTimeout(() => {
-                const successModal = document.getElementById('success-modal');
-                if (successModal) successModal.classList.remove('hidden');
-            }, 1000);
-            return;
-        }
-    } catch (parseError) {
-        console.error('Error al analizar formSubmissions del localStorage:', parseError);
-        existingSubmissions = [];
-    }
-    
-    // Intentar guardar en el panel de administración si está disponible
-    let savedSuccessfully = false;
-    
-    if (window.adminPanel && typeof window.adminPanel.saveFormSubmission === 'function') {
-        try {
-            console.log('Intentando guardar en el panel de administración...');
-            window.adminPanel.saveFormSubmission(submissionData);
-            console.log('Datos guardados exitosamente en el panel de administración');
-            savedSuccessfully = true;
-        } catch (error) {
-            console.error('Error al guardar en el panel de administración:', error);
-            // Continuará con el guardado en localStorage
-        }
-    } else {
-        console.log('Panel de administración no disponible, guardando en localStorage');
-    }
-    
-    // Guardar en localStorage (siempre como respaldo o si no se pudo guardar en el panel)
-    if (!savedSuccessfully) {
-        try {
-            console.log('Guardando en localStorage...');
-            // Añadir la nueva presentación (ya verificamos que no es duplicado)
-            existingSubmissions.push(submissionData);
-            
-            // Guardar en localStorage
-            localStorage.setItem('formSubmissions', JSON.stringify(existingSubmissions));
-            console.log('Datos guardados exitosamente en localStorage');
-        } catch (storageError) {
-            console.error('Error al guardar en localStorage:', storageError);
-        }
-    }
-    
-    // Simular un tiempo de carga antes de mostrar el modal de éxito
-    console.log('Simulando tiempo de carga antes de mostrar el modal de éxito...');
-    setTimeout(() => {
-        try {
-            // Mostrar el modal de éxito
-            const successModal = document.getElementById('success-modal');
-            
-            if (successModal) {
-                successModal.classList.remove('hidden');
-                console.log('Modal de éxito mostrado');
-            } else {
-                console.error('No se encontró el modal de éxito');
-            }
+        // Guardar en Firestore
+        const saved = await saveFormToFirestore(submissionData);
+        if (saved) {
+            console.log('Datos guardados exitosamente en Firestore');
             
             // Limpiar los datos de localStorage
             localStorage.removeItem('checkInData');
-            console.log('Datos de check-in eliminados de localStorage');
-        } catch (modalError) {
-            console.error('Error al mostrar el modal de éxito:', modalError);
+            
+            // Mostrar el modal de éxito
+            setTimeout(() => {
+                const successModal = document.getElementById('success-modal');
+                if (successModal) {
+                    successModal.classList.remove('hidden');
+                    console.log('Modal de éxito mostrado');
+                } else {
+                    console.error('No se encontró el modal de éxito');
+                }
+            }, 1500);
+        } else {
+            throw new Error('No se pudo guardar en Firestore');
         }
-    }, 1500);
+    } catch (error) {
+        console.error('Error al guardar el formulario:', error);
+        alert('Hubo un error al guardar los datos. Por favor, inténtelo de nuevo.');
+    }
 }
 
 // Manejar el cambio de tamaño de la ventana para ajustar los canvas

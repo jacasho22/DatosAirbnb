@@ -10,6 +10,26 @@ console.log('CryptoJS disponible:', typeof CryptoJS !== 'undefined');
 const ADMIN_USERNAME = 'admin';
 const ADMIN_PASSWORD_HASH = '9a4ec6f94a79d29a33ce56c0ad120ef0f00d83a0a7fc9a5b4a4fd12e97d4beeb'; // SHA-256 de 'balcones22'
 
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
+import { getFirestore, collection, getDocs, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+import { getAnalytics } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-analytics.js';
+
+// Configuración de Firebase (usar las mismas credenciales que en firebase-config.js)
+const firebaseConfig = {
+    apiKey: "AIzaSyBrYqngFt4M7Tz91WM4F5plJ-c6zqWZY7E",
+    authDomain: "datosairbnb.firebaseapp.com",
+    projectId: "datosairbnb",
+    storageBucket: "datosairbnb.firebasestorage.app",
+    messagingSenderId: "404464824763",
+    appId: "1:404464824763:web:abb8de8848a88ffe0d549e",
+    measurementId: "G-FNBBNY6E7H"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+const db = getFirestore(app);
+
 // Variables globales
 let formSubmissions = [];
 let filteredSubmissions = [];
@@ -24,9 +44,35 @@ document.addEventListener('DOMContentLoaded', () => {
     // Configurar el modal de detalles
     setupDetailsModal();
     
-    // Cargar los datos de formularios enviados
+    // Cargar los datos de formularios enviados desde Firestore
     loadFormSubmissions();
 });
+
+/**
+ * Carga los formularios desde Firestore
+ */
+async function loadFormSubmissions() {
+    try {
+        const formRef = collection(db, 'formSubmissions');
+        const q = query(formRef, orderBy('submissionDate', 'desc'));
+        const querySnapshot = await getDocs(q);
+        
+        formSubmissions = querySnapshot.docs.map(doc => ({
+            ...doc.data(),
+            id: doc.id
+        }));
+        
+        // Actualizar la lista filtrada
+        filteredSubmissions = [...formSubmissions];
+        
+        // Actualizar la interfaz
+        updateFormList();
+        updateFilters();
+    } catch (error) {
+        console.error('Error al cargar los formularios:', error);
+        alert('Error al cargar los formularios. Por favor, recarga la página.');
+    }
+}
 
 /**
  * Configura el formulario de login
