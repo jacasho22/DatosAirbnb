@@ -10,25 +10,8 @@ console.log('CryptoJS disponible:', typeof CryptoJS !== 'undefined');
 const ADMIN_USERNAME = 'admin';
 const ADMIN_PASSWORD_HASH = '9a4ec6f94a79d29a33ce56c0ad120ef0f00d83a0a7fc9a5b4a4fd12e97d4beeb'; // SHA-256 de 'balcones22'
 
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
-import { getFirestore, collection, getDocs, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
-import { getAnalytics } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-analytics.js';
-
-// Configuración de Firebase (usar las mismas credenciales que en firebase-config.js)
-const firebaseConfig = {
-    apiKey: "AIzaSyBrYqngFt4M7Tz91WM4F5plJ-c6zqWZY7E",
-    authDomain: "datosairbnb.firebaseapp.com",
-    projectId: "datosairbnb",
-    storageBucket: "datosairbnb.firebasestorage.app",
-    messagingSenderId: "404464824763",
-    appId: "1:404464824763:web:abb8de8848a88ffe0d549e",
-    measurementId: "G-FNBBNY6E7H"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
-const db = getFirestore(app);
+import { collection, getDocs, query, orderBy, deleteDoc, doc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+import { db } from './firebase-config.js';
 
 // Variables globales
 let formSubmissions = [];
@@ -66,8 +49,8 @@ async function loadFormSubmissions() {
         filteredSubmissions = [...formSubmissions];
         
         // Actualizar la interfaz
-        updateFormList();
-        updateFilters();
+        updateSubmissionsTable();
+        applyFilters();
     } catch (error) {
         console.error('Error al cargar los formularios:', error);
         alert('Error al cargar los formularios. Por favor, recarga la página.');
@@ -216,6 +199,16 @@ function setupDetailsModal() {
     const closeModalBtn = document.getElementById('close-modal-btn');
     const downloadPdfBtn = document.getElementById('download-pdf-btn');
     
+    if (downloadPdfBtn) {
+        downloadPdfBtn.addEventListener('click', () => {
+            const formId = modal.dataset.formId;
+            const formData = formSubmissions.find(f => f.id === formId);
+            if (formData) {
+                generatePDF(formData);
+            }
+        });
+    }
+    
     if (closeBtn && modal) {
         closeBtn.addEventListener('click', () => {
             modal.classList.add('hidden');
@@ -243,28 +236,7 @@ function setupDetailsModal() {
     }
 }
 
-/**
- * Carga los datos de formularios enviados desde localStorage
- */
-function loadFormSubmissions() {
-    // En un entorno real, estos datos vendrían de una base de datos en el servidor
-    // Para esta implementación, usaremos localStorage para simular el almacenamiento
-    
-    const storedSubmissions = localStorage.getItem('formSubmissions');
-    
-    if (storedSubmissions) {
-        formSubmissions = JSON.parse(storedSubmissions);
-    } else {
-        // Si no hay datos, inicializar con un array vacío
-        formSubmissions = [];
-    }
-    
-    // Ordenar por fecha (más reciente primero)
-    formSubmissions.sort((a, b) => new Date(b.submissionDate) - new Date(a.submissionDate));
-    
-    // Aplicar filtros iniciales (mostrar todos)
-    applyFilters();
-}
+// Función loadFormSubmissions ya está definida en la línea 54
 
 /**
  * Aplica los filtros seleccionados a los datos
@@ -364,28 +336,22 @@ function deleteForm(formId) {
     // Confirmar antes de eliminar
     if (confirm('¿Estás seguro de que deseas eliminar este formulario? Esta acción no se puede deshacer.')) {
         try {
-            // Obtener los formularios actuales del localStorage
-            let submissions = [];
-            const storedData = localStorage.getItem('formSubmissions');
-            
-            if (storedData) {
-                submissions = JSON.parse(storedData);
-            }
-            
-            // Filtrar para eliminar el formulario seleccionado
-            const updatedSubmissions = submissions.filter(form => form.id !== formId);
-            
-            // Guardar los datos actualizados en localStorage
-            localStorage.setItem('formSubmissions', JSON.stringify(updatedSubmissions));
-            
-            // Actualizar la variable global
-            formSubmissions = updatedSubmissions;
-            
-            // Aplicar filtros y actualizar la tabla
-            applyFilters();
-            
-            // Mostrar mensaje de éxito
-            alert('Formulario eliminado correctamente');
+            // Eliminar el documento de Firestore
+            deleteDoc(doc(db, 'formSubmissions', formId))
+                .then(() => {
+                    // Actualizar la variable global
+                    formSubmissions = formSubmissions.filter(form => form.id !== formId);
+                    
+                    // Aplicar filtros y actualizar la tabla
+                    applyFilters();
+                    
+                    // Mostrar mensaje de éxito
+                    alert('Formulario eliminado correctamente');
+                })
+                .catch(error => {
+                    console.error('Error al eliminar el formulario:', error);
+                    alert('Ocurrió un error al eliminar el formulario');
+                });
         } catch (error) {
             console.error('Error al eliminar el formulario:', error);
             alert('Ocurrió un error al eliminar el formulario');
@@ -471,127 +437,61 @@ function showFormDetails(formId) {
  * @param {Object} formData - Datos del formulario
  */
 function generatePDF(formData) {
-    console.log('Generando PDF con datos:', formData);
     // Crear un nuevo documento PDF
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
     
-    // Configurar el documento
+    // Configurar fuente y tamaño
     doc.setFont('helvetica');
     doc.setFontSize(12);
     
     // Título
-    doc.setFontSize(18);
-    doc.text('Formulario de Check-In', 105, 20, { align: 'center' });
+    doc.setFontSize(16);
+    doc.text('Datos del Formulario', 20, 20);
     doc.setFontSize(12);
     
     // Información general
-    doc.setFontSize(14);
-    doc.text('Información General', 20, 30);
-    doc.setFontSize(12);
-    
-    const submissionDate = new Date(formData.submissionDate).toLocaleDateString();
-    const checkInDate = new Date(formData.checkInDate).toLocaleDateString();
-    
-    doc.text(`Fecha de envío: ${submissionDate}`, 20, 40);
-    doc.text(`Apartamento: ${formData.apartment}`, 20, 45);
-    doc.text(`Fecha de entrada: ${checkInDate}`, 20, 50);
-    doc.text(`Número de huéspedes: ${formData.guestsCount}`, 20, 55);
+    doc.text('Información General:', 20, 35);
+    doc.text(`Fecha de envío: ${new Date(formData.submissionDate).toLocaleDateString()}`, 20, 45);
+    doc.text(`Apartamento: ${formData.apartment}`, 20, 55);
+    doc.text(`Fecha de entrada: ${new Date(formData.checkInDate).toLocaleDateString()}`, 20, 65);
+    doc.text(`Número de huéspedes: ${formData.guestsCount}`, 20, 75);
     
     // Información de cada huésped
-    let yPos = 65;
-    
-    for (let i = 0; i < formData.guests.length; i++) {
-        const guest = formData.guests[i];
-        const birthDate = new Date(guest.birthDate).toLocaleDateString();
-        const checkoutDate = guest.checkoutDate ? new Date(guest.checkoutDate).toLocaleDateString() : 'No especificada';
-        
-        // Añadir nueva página si no hay espacio suficiente
+    let yPos = 95;
+    formData.guests.forEach((guest, index) => {
+        // Verificar si necesitamos una nueva página
         if (yPos > 250) {
             doc.addPage();
             yPos = 20;
         }
         
         doc.setFontSize(14);
-        doc.text(`Huésped ${i + 1}`, 20, yPos);
+        doc.text(`Huésped ${index + 1}`, 20, yPos);
         doc.setFontSize(12);
         
-        yPos += 10;
+        yPos += 15;
         doc.text(`Nombre: ${guest.fullName}`, 20, yPos);
-        yPos += 5;
-        doc.text(`Fecha de nacimiento: ${birthDate}`, 20, yPos);
-        yPos += 5;
+        yPos += 10;
+        doc.text(`Fecha de nacimiento: ${new Date(guest.birthDate).toLocaleDateString()}`, 20, yPos);
+        yPos += 10;
         doc.text(`Nacionalidad: ${guest.nationality}`, 20, yPos);
-        yPos += 5;
+        yPos += 10;
         doc.text(`Dirección: ${guest.address || 'No especificada'}`, 20, yPos);
-        yPos += 5;
+        yPos += 10;
         doc.text(`Parentesco: ${guest.relationship || 'No especificado'}`, 20, yPos);
-        yPos += 5;
-        doc.text(`Fecha de salida: ${checkoutDate}`, 20, yPos);
-        yPos += 5;
+        yPos += 10;
+        doc.text(`Fecha de salida: ${guest.checkoutDate ? new Date(guest.checkoutDate).toLocaleDateString() : 'No especificada'}`, 20, yPos);
+        yPos += 10;
         doc.text(`Tipo de documento: ${guest.documentType}`, 20, yPos);
-        yPos += 5;
+        yPos += 10;
         doc.text(`Número de documento: ${guest.documentNumber}`, 20, yPos);
         
-        // Añadir imagen del documento al PDF si está disponible
-        yPos += 10;
-        if (guest.documentPhoto && guest.documentPhoto !== 'no-photo' && guest.documentPhoto !== 'error-photo' && guest.documentPhoto !== 'No disponible') {
-            try {
-                // Verificar si hay espacio suficiente para la imagen del documento
-                if (yPos > 200) {
-                    doc.addPage();
-                    yPos = 20;
-                }
-                doc.text('Documento:', 20, yPos);
-                yPos += 5;
-                // Añadir la imagen del documento (más grande que la firma)
-                doc.addImage(guest.documentPhoto, 'JPEG', 20, yPos, 80, 60);
-                yPos += 65;
-                console.log(`Imagen del documento añadida al PDF para huésped ${i+1}`);
-            } catch (error) {
-                console.error(`Error al añadir imagen del documento al PDF para huésped ${i+1}:`, error);
-                doc.text('Error al cargar la imagen del documento', 20, yPos);
-                yPos += 5;
-            }
-        } else {
-            doc.text('Documento: No disponible', 20, yPos);
-            yPos += 5;
-        }
-        
-        // Añadir firma al PDF si está disponible
-        yPos += 10;
-        if (guest.signature && guest.signature !== 'no-signature' && guest.signature !== 'error-signature' && guest.signature !== 'No disponible') {
-            try {
-                // Verificar si hay espacio suficiente para la firma
-                if (yPos > 250) {
-                    doc.addPage();
-                    yPos = 20;
-                }
-                doc.text('Firma:', 20, yPos);
-                yPos += 5;
-                // Añadir la imagen de la firma
-                doc.addImage(guest.signature, 'PNG', 20, yPos, 50, 20);
-                yPos += 25;
-                console.log(`Firma añadida al PDF para huésped ${i+1}`);
-            } catch (error) {
-                console.error(`Error al añadir firma al PDF para huésped ${i+1}:`, error);
-                doc.text('Error al cargar la firma', 20, yPos);
-                yPos += 5;
-            }
-        } else {
-            doc.text('Firma: No disponible', 20, yPos);
-            yPos += 5;
-        }
-        
-        yPos += 15;
-    }
+        yPos += 25;
+    });
     
-    // Generar el nombre del archivo
-    const fileName = `checkin_${formData.apartment}_${checkInDate.replace(/\//g, '-')}.pdf`;
-    
-    console.log('Descargando PDF:', fileName);
-    // Descargar el PDF
-    doc.save(fileName);
+    // Guardar el PDF
+    doc.save(`formulario_${formData.id}.pdf`);
 }
 
 /**
@@ -616,8 +516,7 @@ function saveFormSubmission(formData) {
     // Ordenar por fecha (más reciente primero)
     formSubmissions.sort((a, b) => new Date(b.submissionDate) - new Date(a.submissionDate));
     
-    // Guardar en localStorage
-    localStorage.setItem('formSubmissions', JSON.stringify(formSubmissions));
+    // Los datos ya están guardados en Firestore
     
     // Si el panel de administración está abierto, actualizar la tabla
     if (!document.getElementById('admin-panel').classList.contains('hidden')) {
@@ -635,32 +534,6 @@ window.adminPanel = {
         password: "9a4ec6f94a79d29a33ce56c0ad120ef0f00d83a0a7fc9a5b4a4fd12e97d4beeb"  // balcones22
     },
     
-    // Método para guardar una nueva presentación de formulario
-    saveFormSubmission: function(formData) {
-        // Generar un ID único para el formulario
-        const formId = 'form_' + Date.now();
-        
-        // Añadir fecha de envío y ID
-        const submission = {
-            ...formData,
-            id: formId,
-            submissionDate: new Date().toISOString()
-        };
-        
-        // Añadir a la lista de envíos
-        formSubmissions.push(submission);
-        
-        // Ordenar por fecha (más reciente primero)
-        formSubmissions.sort((a, b) => new Date(b.submissionDate) - new Date(a.submissionDate));
-        
-        // Guardar en localStorage
-        localStorage.setItem('formSubmissions', JSON.stringify(formSubmissions));
-        
-        // Si el panel de administración está abierto, actualizar la tabla
-        if (!document.getElementById('admin-panel').classList.contains('hidden')) {
-            applyFilters();
-        }
-        
-        return formId;
-    }
+    // La función saveFormSubmission ya está definida globalmente
+    saveFormSubmission: saveFormSubmission
 }

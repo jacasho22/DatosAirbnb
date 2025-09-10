@@ -14,9 +14,9 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
-const db = getFirestore(app);
+export const app = initializeApp(firebaseConfig);
+export const analytics = getAnalytics(app);
+export const db = getFirestore(app);
 
 // Function to save form data to Firestore
 export async function saveFormToFirestore(formData) {
