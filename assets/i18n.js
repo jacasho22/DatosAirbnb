@@ -14,8 +14,8 @@ const translations = {
         // Página de inicio
         apartment: "Apartamento",
         select_apartment: "Selecciona un apartamento",
-        apartment_1: "Apartamento 1",
-        apartment_2: "Apartamento 2",
+        apartment_1: "Residencial Camposol",
+        apartment_2: "Piso Ramón Gallud",
         date: "Fecha de entrada",
         guests: "Número de huéspedes",
         start_checkin: "Iniciar Check-In",
@@ -68,8 +68,8 @@ const translations = {
         // Home page
         apartment: "Apartment",
         select_apartment: "Select an apartment",
-        apartment_1: "Apartment 1",
-        apartment_2: "Apartment 2",
+        apartment_1: "Residencial Camposol",
+        apartment_2: "Piso Ramón Gallud",
         date: "Check-in date",
         guests: "Number of guests",
         start_checkin: "Start Check-In",

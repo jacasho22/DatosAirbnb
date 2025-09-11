@@ -15,8 +15,8 @@
     <script src="assets/firebase-config.js" type="module"></script>
     <script src="assets/admin.js" type="module"></script>
 </head>
-<body class="bg-gray-100 min-h-screen">
-    <div class="container mx-auto px-4 py-8">
+<body class="min-h-screen" style="background: url('assets/background.svg') no-repeat center center fixed; background-size: cover;">
+    <div class="container mx-auto px-4 py-8 bg-white bg-opacity-90 rounded-lg shadow-lg mt-8">
         <!-- Pantalla de login -->
         <div id="login-screen" class="max-w-md mx-auto bg-white p-6 rounded-lg shadow-md">
             <h1 class="text-2xl font-bold text-center mb-6">Acceso al Panel de Administración</h1>
@@ -55,8 +55,8 @@
                         <label for="apartment-filter" class="block text-gray-700 font-medium mb-2">Filtrar por apartamento</label>
                         <select id="apartment-filter" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                             <option value="">Todos</option>
-                            <option value="1">Apartamento 1</option>
-                            <option value="2">Apartamento 2</option>
+                            <option value="1">Residencial Camposol</option>
+                            <option value="2">Piso Ramón Gallud</option>
                         </select>
                     </div>
                     <div class="form-group self-end">

@@ -7,11 +7,12 @@
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <script src="assets/i18n.js" defer></script>
-    <script src="assets/admin.js" defer></script>
-    <script src="assets/script.js" defer></script>
+    <script src="assets/admin.js" type="module"></script>
+    <script src="assets/script.js" type="module"></script>
+    <script type="module" src="assets/firebase-config.js"></script>
 </head>
-<body class="bg-gray-100 min-h-screen">
-    <div class="container mx-auto px-4 py-8">
+<body class="min-h-screen" style="background: url('assets/background.svg') no-repeat center center fixed; background-size: cover;">
+    <div class="container mx-auto px-4 py-8 bg-white bg-opacity-90 rounded-lg shadow-lg mt-8">
         <header class="text-center mb-8">
             <h1 class="text-3xl font-bold text-blue-600" data-i18n="welcome">Bienvenido al Check-In</h1>
             <div class="mt-4">

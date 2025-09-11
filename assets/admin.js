@@ -296,7 +296,7 @@ function updateSubmissionsTable() {
         
         row.innerHTML = `
             <td class="py-2 px-4 border-b">${formattedDate}</td>
-            <td class="py-2 px-4 border-b">Apartamento ${form.apartment}</td>
+            <td class="py-2 px-4 border-b">${form.apartment === '1' ? 'Residencial Camposol' : 'Piso Ramón Gallud'}</td>
             <td class="py-2 px-4 border-b">${form.guestsCount}</td>
             <td class="py-2 px-4 border-b">
                 <button class="view-details-btn bg-blue-500 text-white px-2 py-1 rounded text-sm hover:bg-blue-600 transition duration-300 mr-2" data-id="${form.id}">Ver detalles</button>
@@ -382,7 +382,7 @@ function showFormDetails(formId) {
         <div class="bg-gray-100 p-4 rounded-md mb-4">
             <h3 class="font-semibold">Información general</h3>
             <p><strong>Fecha de envío:</strong> ${submissionDate}</p>
-            <p><strong>Apartamento:</strong> ${form.apartment}</p>
+            <p><strong>Apartamento:</strong> ${form.apartment === '1' ? 'Residencial Camposol' : 'Piso Ramón Gallud'}</p>
             <p><strong>Fecha de entrada:</strong> ${checkInDate}</p>
             <p><strong>Número de huéspedes:</strong> ${form.guestsCount}</p>
         </div>
