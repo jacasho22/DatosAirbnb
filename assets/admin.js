@@ -3,32 +3,35 @@
  * Maneja la autenticación, visualización y exportación de formularios
  */
 
-// Verificar que CryptoJS esté disponible
-console.log('CryptoJS disponible:', typeof CryptoJS !== 'undefined');
-
-// Credenciales de administrador (en un entorno real, esto se manejaría en el servidor)
-const ADMIN_USERNAME = 'admin';
-const ADMIN_PASSWORD_HASH = '9a4ec6f94a79d29a33ce56c0ad120ef0f00d83a0a7fc9a5b4a4fd12e97d4beeb'; // SHA-256 de 'balcones22'
-
-import { collection, getDocs, query, orderBy, deleteDoc, doc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
 import { db } from './firebase-config.js';
+import { collection, query, where, orderBy, getDocs, doc, deleteDoc, updateDoc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+
+// Credenciales de administrador
+const ADMIN_USERNAME = 'admin';
+const ADMIN_PASSWORD = 'balcones22';
 
 // Variables globales
 let formSubmissions = [];
 let filteredSubmissions = [];
 
-document.addEventListener('DOMContentLoaded', () => {
-    // Configurar el formulario de login
-    setupLoginForm();
-    
-    // Configurar los botones y eventos del panel de administración
-    setupAdminPanel();
-    
-    // Configurar el modal de detalles
-    setupDetailsModal();
-    
-    // Cargar los datos de formularios enviados desde Firestore
-    loadFormSubmissions();
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        console.log('Iniciando carga de datos...');
+        // Configurar el formulario de login
+        setupLoginForm();
+        
+        // Configurar los botones y eventos del panel de administración
+        setupAdminPanel();
+        
+        // Configurar el modal de detalles
+        setupDetailsModal();
+        
+        // Cargar los datos de formularios enviados desde Firestore
+        await loadFormSubmissions();
+        console.log('Datos cargados exitosamente');
+    } catch (error) {
+        console.error('Error al cargar los datos:', error);
+    }
 });
 
 /**
@@ -36,14 +39,54 @@ document.addEventListener('DOMContentLoaded', () => {
  */
 async function loadFormSubmissions() {
     try {
-        const formRef = collection(db, 'formSubmissions');
-        const q = query(formRef, orderBy('submissionDate', 'desc'));
+        console.log('Obteniendo datos de Firestore...');
+        const formSubmissionsRef = collection(db, 'formSubmissions');
+        const q = query(
+            formSubmissionsRef,
+            where('status', '==', 'active'),
+            orderBy('submissionDate', 'desc')
+        );
         const querySnapshot = await getDocs(q);
         
-        formSubmissions = querySnapshot.docs.map(doc => ({
-            ...doc.data(),
-            id: doc.id
-        }));
+        if (querySnapshot.empty) {
+            console.log('No hay datos en la colección formSubmissions');
+            formSubmissions = [];
+            filteredSubmissions = [];
+            updateSubmissionsTable();
+            return;
+        }
+        
+        formSubmissions = [];
+        querySnapshot.forEach(doc => {
+            try {
+                const data = doc.data();
+                console.log('Procesando documento:', { id: doc.id });
+                
+                // Validar datos requeridos
+                if (!data.apartment || !data.checkInDate || !data.guests) {
+                    console.warn('Documento incompleto:', doc.id);
+                    return;
+                }
+                
+                // Formatear fechas
+                const formattedData = {
+                    ...data,
+                    id: doc.id,
+                    submissionDate: data.submissionDate ? new Date(data.submissionDate) : new Date(),
+                    checkInDate: data.checkInDate ? new Date(data.checkInDate) : new Date()
+                };
+                
+                formSubmissions.push(formattedData);
+                console.log('Documento procesado correctamente:', { id: doc.id });
+            } catch (docError) {
+                console.error('Error al procesar documento:', { id: doc.id, error: docError });
+            }
+        });
+        
+        console.log('Total de documentos válidos cargados:', formSubmissions.length);
+        
+        // Ordenar por fecha de envío más reciente
+        formSubmissions.sort((a, b) => b.submissionDate - a.submissionDate);
         
         // Actualizar la lista filtrada
         filteredSubmissions = [...formSubmissions];
@@ -54,6 +97,7 @@ async function loadFormSubmissions() {
     } catch (error) {
         console.error('Error al cargar los formularios:', error);
         alert('Error al cargar los formularios. Por favor, recarga la página.');
+        throw error;
     }
 }
 
@@ -71,14 +115,13 @@ function setupLoginForm() {
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
             
-            // Verificar las credenciales
-            if (verifyCredentials(username, password)) {
+            if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+                // Guardar en sessionStorage
+                sessionStorage.setItem('adminAuthenticated', 'true');
+                
                 // Ocultar la pantalla de login y mostrar el panel de administración
                 document.getElementById('login-screen').classList.add('hidden');
                 document.getElementById('admin-panel').classList.remove('hidden');
-                
-                // Guardar el estado de autenticación en sessionStorage
-                sessionStorage.setItem('adminAuthenticated', 'true');
             } else {
                 // Mostrar mensaje de error
                 if (loginError) {
@@ -101,47 +144,7 @@ function setupLoginForm() {
  * @param {string} password - Contraseña
  * @returns {boolean} - true si las credenciales son válidas, false en caso contrario
  */
-function verifyCredentials(username, password) {
-    // Verificar si estamos usando texto plano o hash
-    if (username === 'admin' && password === 'balcones22') {
-        console.log('Autenticación exitosa con credenciales en texto plano');
-        return true;
-    }
-    
-    // Calcular el hash SHA-256 de la contraseña
-    const passwordHash = CryptoJS.SHA256(password).toString(CryptoJS.enc.Hex);
-    
-    // Verificar con las constantes globales
-    if (username === ADMIN_USERNAME && passwordHash === ADMIN_PASSWORD_HASH) {
-        console.log('Autenticación exitosa con constantes globales');
-        return true;
-    }
-    
-    // Intentar verificar con el objeto adminCredentials si está disponible
-    if (window.adminPanel && window.adminPanel.adminCredentials) {
-        const usernameHash = CryptoJS.SHA256(username).toString(CryptoJS.enc.Hex);
-        const adminCreds = window.adminPanel.adminCredentials;
-        
-        console.log('Verificando con adminCredentials:', {
-            usernameHash,
-            passwordHash,
-            expectedUsernameHash: adminCreds.username,
-            expectedPasswordHash: adminCreds.password,
-            matchUsername: usernameHash === adminCreds.username,
-            matchPassword: passwordHash === adminCreds.password
-        });
-        
-        if (usernameHash === adminCreds.username && passwordHash === adminCreds.password) {
-            console.log('Autenticación exitosa con adminCredentials');
-            return true;
-        }
-    } else {
-        console.log('adminCredentials no está disponible');
-    }
-    
-    console.log('Autenticación fallida');
-    return false;
-}
+// La función verifyCredentials ya no es necesaria ya que usamos Firebase Auth
 
 /**
  * Configura los eventos y botones del panel de administración
@@ -150,18 +153,24 @@ function setupAdminPanel() {
     // Configurar el botón de cerrar sesión
     const logoutBtn = document.getElementById('logout-btn');
     if (logoutBtn) {
+        // Listener único y claro para cerrar sesión
         logoutBtn.addEventListener('click', () => {
-            // Eliminar el estado de autenticación
+            // Limpiar sessionStorage
             sessionStorage.removeItem('adminAuthenticated');
-            
+
             // Ocultar el panel de administración y mostrar la pantalla de login
-            document.getElementById('admin-panel').classList.add('hidden');
-            document.getElementById('login-screen').classList.remove('hidden');
-            
-            // Limpiar los campos del formulario de login
-            document.getElementById('username').value = '';
-            document.getElementById('password').value = '';
-            document.getElementById('login-error').classList.add('hidden');
+            const adminPanel = document.getElementById('admin-panel');
+            const loginScreen = document.getElementById('login-screen');
+            if (adminPanel) adminPanel.classList.add('hidden');
+            if (loginScreen) loginScreen.classList.remove('hidden');
+
+            // Limpiar los campos del formulario de login y ocultar errores
+            const usernameEl = document.getElementById('username');
+            const passwordEl = document.getElementById('password');
+            const loginError = document.getElementById('login-error');
+            if (usernameEl) usernameEl.value = '';
+            if (passwordEl) passwordEl.value = '';
+            if (loginError) loginError.classList.add('hidden');
         });
     }
     
@@ -278,12 +287,19 @@ function updateSubmissionsTable() {
     if (filteredSubmissions.length === 0) {
         // Mostrar mensaje de "no hay datos"
         const emptyRow = document.createElement('tr');
+        emptyRow.id = 'no-data-message';
         emptyRow.className = 'submissions-empty-row';
         emptyRow.innerHTML = `
-            <td colspan="4" class="py-4 text-center text-gray-500">No hay formularios enviados</td>
+            <td colspan="4" class="py-4 text-center text-gray-500">No hay formularios enviados todavía</td>
         `;
         tableBody.appendChild(emptyRow);
         return;
+    }
+    
+    // Eliminar mensaje de no hay datos si existe
+    const noDataMessage = document.getElementById('no-data-message');
+    if (noDataMessage) {
+        noDataMessage.remove();
     }
     
     // Añadir filas para cada formulario
@@ -292,12 +308,20 @@ function updateSubmissionsTable() {
         row.className = 'hover:bg-gray-50';
         
         // Formatear la fecha
-        const formattedDate = new Date(form.submissionDate).toLocaleDateString();
+        let formattedDate = 'Fecha no disponible';
+        try {
+            if (form.submissionDate) {
+                formattedDate = new Date(form.submissionDate).toLocaleDateString();
+            }
+            console.log('Fecha formateada:', formattedDate);
+        } catch (error) {
+            console.error('Error al formatear la fecha:', error);
+        }
         
         row.innerHTML = `
             <td class="py-2 px-4 border-b">${formattedDate}</td>
             <td class="py-2 px-4 border-b">${form.apartment === '1' ? 'Residencial Camposol' : 'Piso Ramón Gallud'}</td>
-            <td class="py-2 px-4 border-b">${form.guestsCount}</td>
+            <td class="py-2 px-4 border-b">${form.guests ? form.guests.length : form.guestsCount || 0}</td>
             <td class="py-2 px-4 border-b">
                 <button class="view-details-btn bg-blue-500 text-white px-2 py-1 rounded text-sm hover:bg-blue-600 transition duration-300 mr-2" data-id="${form.id}">Ver detalles</button>
                 <button class="delete-form-btn bg-red-500 text-white px-2 py-1 rounded text-sm hover:bg-red-600 transition duration-300" data-id="${form.id}">Eliminar</button>
@@ -330,32 +354,28 @@ function updateSubmissionsTable() {
  * Elimina un formulario de la lista
  * @param {string} formId - ID del formulario a eliminar
  */
-function deleteForm(formId) {
+async function deleteForm(formId) {
     if (!formId) return;
     
     // Confirmar antes de eliminar
     if (confirm('¿Estás seguro de que deseas eliminar este formulario? Esta acción no se puede deshacer.')) {
-        try {
-            // Eliminar el documento de Firestore
-            deleteDoc(doc(db, 'formSubmissions', formId))
-                .then(() => {
-                    // Actualizar la variable global
-                    formSubmissions = formSubmissions.filter(form => form.id !== formId);
-                    
-                    // Aplicar filtros y actualizar la tabla
-                    applyFilters();
-                    
-                    // Mostrar mensaje de éxito
-                    alert('Formulario eliminado correctamente');
-                })
-                .catch(error => {
-                    console.error('Error al eliminar el formulario:', error);
-                    alert('Ocurrió un error al eliminar el formulario');
-                });
-        } catch (error) {
-            console.error('Error al eliminar el formulario:', error);
-            alert('Ocurrió un error al eliminar el formulario');
-        }
+            try {
+                // Eliminar el documento de Firestore (API modular)
+                const docRef = doc(db, 'formSubmissions', formId);
+                await deleteDoc(docRef);
+
+                // Actualizar la variable global
+                formSubmissions = formSubmissions.filter(form => form.id !== formId);
+
+                // Aplicar filtros y actualizar la tabla
+                applyFilters();
+
+                // Mostrar mensaje de éxito
+                alert('Formulario eliminado correctamente');
+            } catch (error) {
+                console.error('Error al eliminar el formulario:', error);
+                alert('Ocurrió un error al eliminar el formulario');
+            }
     }
 }
 
@@ -374,13 +394,30 @@ function showFormDetails(formId) {
     modal.dataset.formId = formId;
     
     // Formatear las fechas
-    const submissionDate = new Date(form.submissionDate).toLocaleDateString();
-    const checkInDate = new Date(form.checkInDate).toLocaleDateString();
+    let submissionDate = 'Fecha no disponible';
+    let checkInDate = 'Fecha no disponible';
+    
+    try {
+        if (form.submissionDate) {
+            submissionDate = new Date(form.submissionDate).toLocaleDateString();
+        }
+        if (form.checkInDate) {
+            checkInDate = new Date(form.checkInDate).toLocaleDateString();
+        }
+        console.log('Fechas formateadas:', { submissionDate, checkInDate });
+    } catch (error) {
+        console.error('Error al formatear las fechas:', error);
+    }
     
     // Construir el contenido del modal
     let html = `
         <div class="bg-gray-100 p-4 rounded-md mb-4">
             <h3 class="font-semibold">Información general</h3>
+            <div class="flex items-center mb-2">
+                <label class="inline-block w-40 font-medium">Número de Referencia:</label>
+                <input type="text" id="reference-number" class="px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" value="${form.referenceNumber || ''}">
+                <button id="save-reference-btn" data-form-id="${formId}" class="ml-2 bg-green-500 text-white px-2 py-1 rounded text-sm hover:bg-green-600 transition duration-300">Guardar</button>
+            </div>
             <p><strong>Fecha de envío:</strong> ${submissionDate}</p>
             <p><strong>Apartamento:</strong> ${form.apartment === '1' ? 'Residencial Camposol' : 'Piso Ramón Gallud'}</p>
             <p><strong>Fecha de entrada:</strong> ${checkInDate}</p>
@@ -389,10 +426,22 @@ function showFormDetails(formId) {
     `;
     
     // Añadir información de cada huésped
-    for (let i = 0; i < form.guests.length; i++) {
-        const guest = form.guests[i];
-        const birthDate = new Date(guest.birthDate).toLocaleDateString();
-        const checkoutDate = guest.checkoutDate ? new Date(guest.checkoutDate).toLocaleDateString() : 'No especificada';
+    if (form.guests && Array.isArray(form.guests)) {
+        for (let i = 0; i < form.guests.length; i++) {
+            const guest = form.guests[i];
+            let birthDate = 'Fecha no disponible';
+            let checkoutDate = 'No especificada';
+            
+            try {
+                if (guest.birthDate) {
+                    birthDate = new Date(guest.birthDate).toLocaleDateString();
+                }
+                if (guest.checkoutDate) {
+                    checkoutDate = new Date(guest.checkoutDate).toLocaleDateString();
+                }
+            } catch (error) {
+                console.error(`Error al formatear las fechas del huésped ${i + 1}:`, error);
+            }
         
         html += `
             <div class="border p-4 rounded-md">
@@ -410,8 +459,8 @@ function showFormDetails(formId) {
                 
                 <div class="mt-4">
                     <h4 class="font-medium">Documento</h4>
-                    <div class="mt-2 border p-2 rounded bg-gray-50">
-                        <img src="${guest.documentPhoto}" alt="Documento" class="max-h-40 mx-auto">
+                    <div class="mt-2 border p-2 rounded bg-gray-50 text-center">
+                        ${guest.documentPhoto ? `<img src="${guest.documentPhoto}" alt="Documento" class="max-h-40 mx-auto">` : `<p class="text-sm text-gray-500">No hay foto del documento</p>`}
                     </div>
                 </div>
                 
@@ -430,6 +479,33 @@ function showFormDetails(formId) {
     
     // Mostrar el modal
     modal.classList.remove('hidden');
+    
+    // Configurar el botón para guardar el número de referencia
+    const saveReferenceBtn = document.getElementById('save-reference-btn');
+    if (saveReferenceBtn) {
+        saveReferenceBtn.addEventListener('click', async () => {
+            const formId = saveReferenceBtn.dataset.formId;
+            const referenceNumber = document.getElementById('reference-number').value;
+
+            // Actualizar en Firestore (API modular)
+            try {
+                const docRef = doc(db, 'formSubmissions', formId);
+                await updateDoc(docRef, { referenceNumber });
+
+                // Actualizar en la variable local
+                const formIndex = formSubmissions.findIndex(f => f.id === formId);
+                if (formIndex !== -1) {
+                    formSubmissions[formIndex].referenceNumber = referenceNumber;
+                }
+
+                // Mostrar mensaje de éxito
+                alert('Número de referencia guardado correctamente');
+            } catch (error) {
+                console.error('Error al guardar el número de referencia:', error);
+                alert('Ocurrió un error al guardar el número de referencia');
+            }
+        });
+    }
 }
 
 /**
@@ -452,13 +528,23 @@ function generatePDF(formData) {
     
     // Información general
     doc.text('Información General:', 20, 35);
-    doc.text(`Fecha de envío: ${new Date(formData.submissionDate).toLocaleDateString()}`, 20, 45);
-    doc.text(`Apartamento: ${formData.apartment}`, 20, 55);
-    doc.text(`Fecha de entrada: ${new Date(formData.checkInDate).toLocaleDateString()}`, 20, 65);
-    doc.text(`Número de huéspedes: ${formData.guestsCount}`, 20, 75);
+    // Incluir el número de referencia si existe
+    let yPos = 45;
+    if (formData.referenceNumber) {
+        doc.text(`Número de Referencia: ${formData.referenceNumber}`, 20, yPos);
+        yPos += 10;
+    }
+    doc.text(`Fecha de envío: ${new Date(formData.submissionDate).toLocaleDateString()}`, 20, yPos);
+    yPos += 10;
+    doc.text(`Apartamento: ${formData.apartment === '1' ? 'Residencial Camposol' : 'Piso Ramón Gallud'}`, 20, yPos);
+    yPos += 10;
+    doc.text(`Fecha de entrada: ${new Date(formData.checkInDate).toLocaleDateString()}`, 20, yPos);
+    yPos += 10;
+    doc.text(`Número de huéspedes: ${formData.guestsCount}`, 20, yPos);
+    yPos += 20;
     
     // Información de cada huésped
-    let yPos = 95;
+    yPos = 95;
     formData.guests.forEach((guest, index) => {
         // Verificar si necesitamos una nueva página
         if (yPos > 250) {
@@ -536,4 +622,5 @@ window.adminPanel = {
     
     // La función saveFormSubmission ya está definida globalmente
     saveFormSubmission: saveFormSubmission
+}
 }

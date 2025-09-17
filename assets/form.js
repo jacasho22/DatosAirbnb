@@ -9,73 +9,186 @@ let currentGuestIndex = 0;
 let guestForms = [];
 let signatures = [];
 
-document.addEventListener('DOMContentLoaded', () => {
-    // Cargar los datos de check-in desde localStorage
-    loadCheckInData();
-    
-    // Si no hay datos, redirigir a la página de inicio
-    if (!checkInData) {
-        window.location.href = 'index.html';
-        return;
+// Helper: append debug messages to a visible debug box on the page
+function debugLog(msg, level = 'info') {
+    console[level](msg);
+    try {
+        let dbg = document.getElementById('form-debug-log');
+        if (!dbg) {
+            dbg = document.createElement('div');
+            dbg.id = 'form-debug-log';
+            dbg.style.position = 'fixed';
+            dbg.style.right = '12px';
+            dbg.style.bottom = '12px';
+            dbg.style.maxWidth = '360px';
+            dbg.style.maxHeight = '200px';
+            dbg.style.overflow = 'auto';
+            dbg.style.background = 'rgba(255,255,255,0.95)';
+            dbg.style.border = '1px solid #ddd';
+            dbg.style.padding = '8px';
+            dbg.style.fontSize = '12px';
+            dbg.style.zIndex = '9999';
+            document.body.appendChild(dbg);
+        }
+        const p = document.createElement('div');
+        p.textContent = `${new Date().toLocaleTimeString()} - ${msg}`;
+        dbg.appendChild(p);
+    } catch (e) {
+        // ignore DOM errors
     }
-    
-    // Mostrar información del apartamento y fecha
-    displayApartmentInfo();
-    
-    // Generar los formularios para cada huésped
-    generateGuestForms();
-    
-    // Configurar los botones de navegación
-    setupNavigationButtons();
-    
-    // Configurar el formulario principal
-    setupMainForm();
-    
-    // Configurar los modales
-    setupModals();
-    
-    // Mostrar el primer formulario de huésped
-    showGuestForm(0);
-    updateProgressBar();
-});
+}
+
+// Importar las funciones necesarias de Firebase
+// NOTE: don't import firebase-config at module top-level. It uses browser-only imports (https://) which
+// cause Node's ESM loader to fail during unit tests. simulateFormSubmission dynamically imports
+// './firebase-config.js' when needed so we avoid top-level import to keep this module testable.
+
+// Exported initializer for the form page. Tests can import this without triggering auto-run effects.
+export async function initFormPage() {
+    try {
+        debugLog('initFormPage');
+
+        // Cargar los datos de check-in desde localStorage
+        loadCheckInData();
+        debugLog('Datos de check-in cargados: ' + JSON.stringify(checkInData));
+
+        // Si no hay datos, redirigir a la página de inicio (solo si realmente no se inicializó)
+        if (!checkInData) {
+            debugLog('No hay datos de check-in, redirigiendo a index.html', 'warn');
+            window.location.href = 'index.html';
+            return;
+        }
+
+        // Mostrar información del apartamento y fecha (proteger si i18n no está disponible)
+        try {
+            displayApartmentInfo();
+        } catch (err) {
+            debugLog('displayApartmentInfo fallo, se continúa de todas formas: ' + err, 'warn');
+        }
+
+        // Inicializar los formularios de huéspedes
+        try {
+            initGuestForms();
+        } catch (err) {
+            debugLog('Error inicializando guest forms: ' + err, 'error');
+        }
+
+        // Configurar los botones de navegación
+        setupNavigationButtons();
+
+        // Configurar el formulario principal
+        setupMainForm();
+
+        // Configurar los modales
+        setupModals();
+
+        // Mostrar el primer formulario de huésped solo si existen formularios
+        if (guestForms && guestForms.length > 0) {
+            debugLog('Guest forms creados: ' + guestForms.length);
+            showGuestForm(0);
+            updateProgressBar();
+        } else {
+            debugLog('No se crearon formularios de huéspedes (guestForms vacío). Forzando generación mínima.', 'warn');
+            // Intentar regenerar una vez más
+            generateGuestForms();
+            if (guestForms.length > 0) {
+                showGuestForm(0);
+                updateProgressBar();
+            } else {
+                // Fallback: crear un formulario mínimo para depuración
+                debugLog('Fallback: creando formulario mínimo manualmente', 'warn');
+                const guestFormsContainer = document.getElementById('guest-forms-container');
+                if (guestFormsContainer) {
+                    const fallbackDiv = document.createElement('div');
+                    fallbackDiv.className = 'guest-form bg-white p-6 rounded-lg shadow-md';
+                    fallbackDiv.innerHTML = '<p style="color:#333">Formulario de depuración: complete los datos aquí.</p>';
+                    guestFormsContainer.appendChild(fallbackDiv);
+                    guestForms = Array.from(document.querySelectorAll('.guest-form'));
+                    showGuestForm(0);
+                    updateProgressBar();
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error en initFormPage:', error);
+        throw error;
+    }
+}
+
+// Export key functions for testing
+export { generateGuestForms, showGuestForm, validateCurrentForm, simulateFormSubmission, initGuestForms, initializeSignatureCanvases };
 
 /**
  * Carga los datos de check-in desde localStorage
  */
 function loadCheckInData() {
-    const data = localStorage.getItem('checkInData');
-    
-    if (data) {
-        checkInData = JSON.parse(data);
+    try {
+        const data = localStorage.getItem('checkInData');
+        console.log('Cargando datos de check-in desde localStorage');
+        console.log('Datos en localStorage:', data);
         
-        // Establecer el idioma guardado
-        if (checkInData.language) {
-            window.i18n.setLanguage(checkInData.language);
-            // Forzar la actualización de los textos después de establecer el idioma
-            setTimeout(() => window.i18n.updateTexts(), 100);
+        if (data) {
+            checkInData = JSON.parse(data);
+            console.log('Datos parseados:', checkInData);
+            
+            // Asegurarse de que guestsCount esté definido
+            if (!checkInData.guestsCount && checkInData.numGuests) {
+                checkInData.guestsCount = checkInData.numGuests;
+            } else if (!checkInData.guestsCount) {
+                checkInData.guestsCount = 2; // Valor por defecto
+            }
+            
+            // Establecer el idioma guardado
+            if (checkInData.language) {
+                window.i18n.setLanguage(checkInData.language);
+                // Forzar la actualización de los textos después de establecer el idioma
+                setTimeout(() => window.i18n.updateTexts(), 100);
+            }
+        } else {
+            console.error('No hay datos de check-in en localStorage');
+            // Datos de prueba para desarrollo
+            checkInData = {
+                apartment: '1',
+                checkInDate: '2023-06-15',
+                guestsCount: 2,
+                language: 'es'
+            };
+            console.log('Usando datos de prueba:', checkInData);
         }
+    } catch (error) {
+        console.error('Error al cargar datos desde localStorage:', error);
+        // Datos de prueba en caso de error
+        checkInData = {
+            apartment: '1',
+            checkInDate: '2023-06-15',
+            guestsCount: 2,
+            language: 'es'
+        };
+        console.log('Usando datos de prueba por error:', checkInData);
     }
 }
 
 /**
- * Muestra la información del apartamento y fecha de entrada
+ * Muestra la información del apartamento y fecha en la página
  */
 function displayApartmentInfo() {
-    const apartmentInfo = document.getElementById('apartment-info');
+    console.log('Mostrando información del apartamento');
     
+    const apartmentInfo = document.getElementById('apartment-info');
     if (apartmentInfo && checkInData) {
-        const apartmentText = window.i18n.getText(
-            checkInData.apartment === '1' ? 'apartment_1' : 'apartment_2'
-        );
+        const apartmentText = checkInData.apartment === '1' ? 
+            window.i18n.getText('apartment_1') : 
+            window.i18n.getText('apartment_2');
         
-        // Formatear la fecha según el idioma actual
-        const dateOptions = { year: 'numeric', month: 'long', day: 'numeric' };
-        const formattedDate = new Date(checkInData.checkInDate).toLocaleDateString(
-            window.i18n.getCurrentLanguage() === 'es' ? 'es-ES' : 'en-US',
-            dateOptions
-        );
+        const checkInDate = new Date(checkInData.checkInDate).toLocaleDateString('es-ES');
         
-        apartmentInfo.textContent = `${apartmentText} - ${formattedDate}`;
+        apartmentInfo.textContent = `${apartmentText} - ${checkInDate}`;
+        console.log('Información del apartamento mostrada:', apartmentInfo.textContent);
+    } else {
+        console.error('No se pudo mostrar la información del apartamento:', {
+            apartmentInfo: !!apartmentInfo,
+            checkInData: checkInData
+        });
     }
 }
 
@@ -83,203 +196,292 @@ function displayApartmentInfo() {
  * Genera los formularios para cada huésped
  */
 function generateGuestForms() {
-    const guestFormsContainer = document.getElementById('guest-forms');
+    console.log('Iniciando generateGuestForms');
+    
+    const guestFormsContainer = document.getElementById('guest-forms-container');
     const template = document.getElementById('guest-template');
     
+    console.log('Template encontrado:', template);
+    console.log('Contenedor encontrado:', guestFormsContainer);
+    
     if (!guestFormsContainer || !template || !checkInData) {
+        console.error('Error al generar formularios:', {
+            guestFormsContainer: !!guestFormsContainer,
+            template: !!template,
+            checkInData: checkInData
+        });
         return;
     }
+    
+    const guestCount = checkInData.numGuests || checkInData.guestsCount;
+    console.log('Generando formularios para', guestCount, 'huéspedes');
+    
+    // Asegurarse de que el contenedor sea visible
+    guestFormsContainer.style.display = 'block';
     
     // Limpiar el contenedor
     guestFormsContainer.innerHTML = '';
     
     // Crear un formulario para cada huésped
-    for (let i = 0; i < checkInData.guestsCount; i++) {
-        // Clonar la plantilla
-        const guestForm = template.content.cloneNode(true);
+    for (let i = 0; i < guestCount; i++) {
+        console.log('Creando formulario para huésped', i + 1);
         
-        // Actualizar el título con el número de huésped
-        const guestTitle = guestForm.querySelector('.guest-title');
-        if (guestTitle) {
-            guestTitle.textContent = `${window.i18n.getText('guest_info')} ${i + 1}`;
-        }
-        
-        // Añadir un ID único al formulario
-        const formDiv = guestForm.querySelector('.guest-form');
-        if (formDiv) {
+        try {
+            // Crear un nuevo div para el formulario
+            const formDiv = document.createElement('div');
+            formDiv.className = 'guest-form bg-white p-6 rounded-lg shadow-md';
             formDiv.id = `guest-form-${i}`;
             formDiv.dataset.index = i;
             
+            // Clonar el contenido del template
+            const content = template.content.cloneNode(true);
+            
+            // Asignar ID único al canvas de firma
+            const canvas = content.querySelector('.signature-canvas');
+            if (canvas) {
+                canvas.id = `signature-canvas-${i}`;
+                console.log(`ID asignado al canvas: signature-canvas-${i}`);
+            } else {
+                console.error('No se encontró el canvas en el template');
+            }
+            
+            // Asignar índice al botón de borrar firma
+            const clearButton = content.querySelector('.clear-signature');
+            if (clearButton) {
+                clearButton.dataset.index = i;
+                clearButton.addEventListener('click', function() { 
+                    clearSignature(i); 
+                });
+            } else {
+                console.error('No se encontró el botón de borrar firma en el template');
+            }
+            
+            // Añadir el contenido clonado al div
+            formDiv.appendChild(content);
+            
+            // Actualizar el título con el número de huésped
+            const title = formDiv.querySelector('.guest-title');
+            if (title) {
+                title.textContent = `${window.i18n.getText('guest_info')} ${i + 1}`;
+            }
+            
+            // Añadir el formulario al contenedor
+            guestFormsContainer.appendChild(formDiv);
+            
             // Ocultar todos los formularios excepto el primero
             if (i > 0) {
-                formDiv.classList.add('hidden');
+                formDiv.style.display = 'none';
+            } else {
+                formDiv.style.display = 'block';
             }
+            
+            console.log(`Formulario ${i + 1} creado correctamente`);
+        } catch (error) {
+            console.error(`Error al crear el formulario ${i + 1}:`, error);
         }
-        
-        // Configurar el canvas para la firma
-        const canvas = guestForm.querySelector('.signature-canvas');
-        if (canvas) {
-            canvas.id = `signature-canvas-${i}`;
-        }
-        
-        // Configurar el botón para borrar la firma
-        const clearButton = guestForm.querySelector('.clear-signature');
-        if (clearButton) {
-            clearButton.dataset.index = i;
-            clearButton.addEventListener('click', function() {
-                const index = parseInt(this.dataset.index, 10);
-                clearSignature(index);
-            });
-        }
-        
-        // Añadir el formulario al contenedor
-        guestFormsContainer.appendChild(guestForm);
     }
     
     // Guardar referencias a los formularios
     guestForms = Array.from(document.querySelectorAll('.guest-form'));
+    console.log('Formularios creados:', guestForms.length);
     
-    // Inicializar los canvas de firma
-    initializeSignatureCanvases();
+    // Configurar eventos para los formularios
+    setupGuestFormEvents();
 }
 
 /**
- * Inicializa los canvas para las firmas digitales
+ * Configura los eventos para los formularios de huéspedes
+ */
+function setupGuestFormEvents() {
+    console.log('Configurando eventos para formularios de huéspedes');
+    
+    guestForms.forEach((form, index) => {
+        // Configurar el campo de fecha de nacimiento para mostrar/ocultar el campo de parentesco
+        const birthDateInput = form.querySelector('input[name="birth-date"]');
+        const relationshipField = form.querySelector('.relationship-field');
+        
+        if (birthDateInput && relationshipField) {
+            birthDateInput.addEventListener('change', function() {
+                const birthDate = new Date(this.value);
+                const today = new Date();
+                const age = today.getFullYear() - birthDate.getFullYear();
+                
+                // Mostrar campo de parentesco solo si es menor de 18 años
+                if (age < 18) {
+                    relationshipField.style.display = 'block';
+                } else {
+                    relationshipField.style.display = 'none';
+                }
+            });
+        }
+    });
+}
+
+/**
+ * Inicializa los formularios de huéspedes
+ */
+function initGuestForms() {
+    console.log('Inicializando formularios de huéspedes');
+    
+    // Generar los formularios
+    generateGuestForms();
+    
+    // Configurar eventos
+    setupGuestFormEvents();
+    
+    // Inicializar los canvas de firma
+    setTimeout(() => {
+        initializeSignatureCanvases();
+    }, 100);
+}
+
+/**
+ * Inicializa los canvas de firma para todos los formularios
  */
 function initializeSignatureCanvases() {
-    signatures = [];
+    console.log('Inicializando canvas de firma');
     
-    for (let i = 0; i < checkInData.guestsCount; i++) {
-        const canvas = document.getElementById(`signature-canvas-${i}`);
-        
+    signatures = []; // Reiniciar el array de firmas
+    
+    guestForms.forEach((form, index) => {
+        const canvas = form.querySelector(`#signature-canvas-${index}`);
         if (canvas) {
-            // Ajustar el tamaño del canvas
-            const rect = canvas.parentElement.getBoundingClientRect();
+            console.log(`Inicializando canvas ${index}`);
+            
+            // Configurar el tamaño del canvas
+            const rect = canvas.getBoundingClientRect();
             canvas.width = rect.width;
             canvas.height = rect.height;
             
             const ctx = canvas.getContext('2d');
-            ctx.lineWidth = 2;
             ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.lineCap = 'round';
             
-            let drawing = false;
+            let isDrawing = false;
             let lastX = 0;
             let lastY = 0;
             
-            // Eventos para dibujar en el canvas
+            // Eventos para mouse
             canvas.addEventListener('mousedown', (e) => {
-                drawing = true;
+                isDrawing = true;
                 const rect = canvas.getBoundingClientRect();
                 lastX = e.clientX - rect.left;
                 lastY = e.clientY - rect.top;
             });
             
             canvas.addEventListener('mousemove', (e) => {
-                if (!drawing) return;
+                if (!isDrawing) return;
                 
                 const rect = canvas.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const y = e.clientY - rect.top;
+                const currentX = e.clientX - rect.left;
+                const currentY = e.clientY - rect.top;
                 
                 ctx.beginPath();
                 ctx.moveTo(lastX, lastY);
-                ctx.lineTo(x, y);
+                ctx.lineTo(currentX, currentY);
                 ctx.stroke();
                 
-                lastX = x;
-                lastY = y;
+                lastX = currentX;
+                lastY = currentY;
             });
             
             canvas.addEventListener('mouseup', () => {
-                drawing = false;
+                isDrawing = false;
             });
             
-            canvas.addEventListener('mouseleave', () => {
-                drawing = false;
+            canvas.addEventListener('mouseout', () => {
+                isDrawing = false;
             });
             
-            // Eventos táctiles para dispositivos móviles
+            // Eventos para touch (dispositivos móviles)
             canvas.addEventListener('touchstart', (e) => {
                 e.preventDefault();
+                isDrawing = true;
                 const rect = canvas.getBoundingClientRect();
                 const touch = e.touches[0];
                 lastX = touch.clientX - rect.left;
                 lastY = touch.clientY - rect.top;
-                drawing = true;
             });
             
             canvas.addEventListener('touchmove', (e) => {
                 e.preventDefault();
-                if (!drawing) return;
+                if (!isDrawing) return;
                 
                 const rect = canvas.getBoundingClientRect();
                 const touch = e.touches[0];
-                const x = touch.clientX - rect.left;
-                const y = touch.clientY - rect.top;
+                const currentX = touch.clientX - rect.left;
+                const currentY = touch.clientY - rect.top;
                 
                 ctx.beginPath();
                 ctx.moveTo(lastX, lastY);
-                ctx.lineTo(x, y);
+                ctx.lineTo(currentX, currentY);
                 ctx.stroke();
                 
-                lastX = x;
-                lastY = y;
+                lastX = currentX;
+                lastY = currentY;
             });
             
             canvas.addEventListener('touchend', (e) => {
                 e.preventDefault();
-                drawing = false;
+                isDrawing = false;
             });
             
-            // Guardar referencia al contexto del canvas
-            signatures.push({
-                canvas,
-                ctx,
-                isEmpty: true
-            });
+            // Guardar referencia al canvas
+            signatures[index] = canvas;
+            
+            console.log(`Canvas ${index} inicializado correctamente`);
+        } else {
+            console.error(`No se encontró el canvas para el formulario ${index}`);
         }
-    }
+    });
 }
 
 /**
- * Limpia la firma en el canvas especificado
- * @param {number} index - El índice del canvas de firma
+ * Borra la firma del canvas especificado
+ * @param {number} index - Índice del canvas a borrar
  */
 function clearSignature(index) {
-    if (signatures[index]) {
-        const { canvas, ctx } = signatures[index];
+    console.log(`Borrando firma del canvas ${index}`);
+    
+    const canvas = signatures[index];
+    if (canvas) {
+        const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        signatures[index].isEmpty = true;
+        console.log(`Firma ${index} borrada`);
+    } else {
+        console.error(`No se encontró el canvas ${index} para borrar`);
     }
 }
 
 /**
- * Comprueba si un canvas de firma está vacío
- * @param {number} index - El índice del canvas de firma
- * @returns {boolean} - true si el canvas está vacío, false en caso contrario
+ * Verifica si la firma está vacía
+ * @param {number} index - Índice del canvas a verificar
+ * @returns {boolean} - True si está vacía, false si tiene contenido
  */
 function isSignatureEmpty(index) {
-    if (!signatures[index]) return true;
+    const canvas = signatures[index];
+    if (!canvas) return true;
     
-    const { canvas, ctx } = signatures[index];
-    const pixelData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    const ctx = canvas.getContext('2d');
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     
-    // Comprobar si hay algún pixel no transparente
-    for (let i = 3; i < pixelData.length; i += 4) {
-        if (pixelData[i] > 0) {
-            signatures[index].isEmpty = false;
-            return false;
+    // Verificar si hay píxeles no transparentes
+    for (let i = 3; i < imageData.data.length; i += 4) {
+        if (imageData.data[i] !== 0) {
+            return false; // Hay contenido
         }
     }
     
-    signatures[index].isEmpty = true;
-    return true;
+    return true; // Está vacía
 }
 
 /**
- * Configura los botones de navegación entre formularios
+ * Configura los botones de navegación
  */
 function setupNavigationButtons() {
+    console.log('Configurando botones de navegación');
+    
     const prevBtn = document.getElementById('prev-btn');
     const nextBtn = document.getElementById('next-btn');
     const submitBtn = document.getElementById('submit-btn');
@@ -294,40 +496,37 @@ function setupNavigationButtons() {
     
     if (nextBtn) {
         nextBtn.addEventListener('click', () => {
-            // Validar el formulario actual antes de avanzar
+            // Validar el formulario actual antes de continuar
             if (validateCurrentForm()) {
                 if (currentGuestIndex < guestForms.length - 1) {
                     showGuestForm(currentGuestIndex + 1);
+                } else {
+                    // Es el último formulario, mostrar modal de confirmación
+                    showConfirmationModal();
                 }
             }
         });
     }
     
     if (submitBtn) {
-        // Eliminar eventos anteriores para evitar duplicados
-        submitBtn.replaceWith(submitBtn.cloneNode(true));
-        const newSubmitBtn = document.getElementById('submit-btn');
-        
-        if (newSubmitBtn) {
-            console.log('Configurando evento click para el botón de envío');
-            newSubmitBtn.addEventListener('click', (event) => {
-                event.preventDefault();
-                console.log('Botón de envío clickeado');
-                
-                // Validar el último formulario antes de enviar
-                console.log('Validando formulario actual...');
-                if (validateCurrentForm()) {
-                    console.log('Formulario válido, mostrando modal de confirmación');
-                    showConfirmationModal();
-                } else {
-                    console.warn('Formulario inválido, no se muestra el modal de confirmación');
+        submitBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            
+            // Validar todos los formularios
+            let allValid = true;
+            for (let i = 0; i < guestForms.length; i++) {
+                currentGuestIndex = i;
+                if (!validateCurrentForm()) {
+                    allValid = false;
+                    showGuestForm(i); // Mostrar el formulario con errores
+                    break;
                 }
-            });
-        } else {
-            console.error('No se pudo encontrar el botón de envío después de reemplazarlo');
-        }
-    } else {
-        console.error('No se encontró el botón de envío');
+            }
+            
+            if (allValid) {
+                showConfirmationModal();
+            }
+        });
     }
 }
 
@@ -335,95 +534,128 @@ function setupNavigationButtons() {
  * Configura el formulario principal
  */
 function setupMainForm() {
-    const form = document.getElementById('checkin-form');
+    console.log('Configurando formulario principal');
     
+    const form = document.getElementById('checkin-form');
     if (form) {
-        form.addEventListener('submit', (event) => {
-            event.preventDefault();
-            
-            // La lógica de envío se maneja en el modal de confirmación
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            console.log('Envío del formulario interceptado');
         });
     }
 }
 
 /**
- * Configura los modales de confirmación y éxito
+ * Configura los modales
  */
 function setupModals() {
-    const confirmationModal = document.getElementById('confirmation-modal');
-    const successModal = document.getElementById('success-modal');
+    console.log('Configurando modales');
+    
+    // Modal de confirmación
+    const confirmModal = document.getElementById('confirmation-modal');
     const cancelBtn = document.getElementById('cancel-btn');
     const confirmBtn = document.getElementById('confirm-btn');
-    const successBtn = document.getElementById('success-btn');
     
     if (cancelBtn) {
         cancelBtn.addEventListener('click', () => {
-            if (confirmationModal) {
-                confirmationModal.classList.add('hidden');
+            if (confirmModal) {
+                confirmModal.style.display = 'none';
             }
         });
     }
     
     if (confirmBtn) {
-        // Eliminar eventos anteriores para evitar duplicados
-        confirmBtn.replaceWith(confirmBtn.cloneNode(true));
-        const newConfirmBtn = document.getElementById('confirm-btn');
-        
-        if (newConfirmBtn) {
-            console.log('Configurando evento click para el botón de confirmación');
-            newConfirmBtn.addEventListener('click', (event) => {
-                event.preventDefault();
-                console.log('Botón de confirmación clickeado');
-                
-                if (confirmationModal) {
-                    confirmationModal.classList.add('hidden');
-                    console.log('Modal de confirmación ocultado');
-                }
-                
-                // Enviar el formulario
-                console.log('Llamando a submitForm()');
-                submitForm();
-            });
-        } else {
-            console.error('No se pudo encontrar el botón de confirmación después de reemplazarlo');
-        }
-    } else {
-        console.error('No se encontró el botón de confirmación');
+        confirmBtn.addEventListener('click', async () => {
+            if (confirmModal) {
+                confirmModal.style.display = 'none';
+            }
+            try {
+                await submitForm();
+            } catch (e) {
+                console.error('Error en submitForm desde confirmBtn:', e);
+            }
+        });
     }
+    
+    // Modal de éxito
+    const successModal = document.getElementById('success-modal');
+    const successBtn = document.getElementById('success-btn');
     
     if (successBtn) {
         successBtn.addEventListener('click', () => {
-            // Redirigir a la página de inicio
             window.location.href = 'index.html';
         });
     }
+    
+    // Cerrar modales al hacer clic fuera
+    window.addEventListener('click', (e) => {
+        if (e.target === confirmModal) {
+            confirmModal.style.display = 'none';
+        }
+        if (e.target === successModal) {
+            successModal.style.display = 'none';
+        }
+    });
 }
 
 /**
  * Muestra el formulario del huésped especificado
- * @param {number} index - El índice del formulario a mostrar
+ * @param {number} index - Índice del formulario a mostrar
  */
 function showGuestForm(index) {
+    console.log(`Mostrando formulario del huésped ${index + 1}`);
+    
     if (index < 0 || index >= guestForms.length) {
+        console.error('Índice de formulario inválido:', index);
         return;
     }
     
     // Ocultar todos los formularios
     guestForms.forEach(form => {
-        form.classList.add('hidden');
+        form.style.display = 'none';
     });
     
-    // Mostrar el formulario seleccionado
-    guestForms[index].classList.remove('hidden');
-    
-    // Actualizar el índice actual
+    // Mostrar el formulario actual
+    guestForms[index].style.display = 'block';
     currentGuestIndex = index;
+
+    // Visual debug: destacar el formulario mostrado para asegurar que sea visible
+    try {
+        const el = guestForms[index];
+        // Añadir un borde temporal y sombra para hacerlo evidente
+        el.style.border = '2px dashed #ff0000';
+        el.style.boxShadow = '0 6px 18px rgba(255,0,0,0.15)';
+        el.style.padding = el.style.padding || '16px';
+
+        // Forzar foco y scroll al formulario
+        el.setAttribute('tabindex', '-1');
+        el.focus({ preventScroll: true });
+        setTimeout(() => {
+            try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { /* ignore */ }
+        }, 50);
+
+        // Registrar estilos computados para depuración
+        const cs = window.getComputedStyle(el);
+        debugLog(`showGuestForm: computed display=${cs.display}, visibility=${cs.visibility}, opacity=${cs.opacity}`);
+
+        // Registrar estado de los ancestros principales
+        let p = el.parentElement;
+        let depth = 0;
+        while (p && depth < 6) {
+            const pcs = window.getComputedStyle(p);
+            debugLog(`ancestor ${p.tagName}.${p.className || ''}: display=${pcs.display}, visibility=${pcs.visibility}, opacity=${pcs.opacity}`);
+            p = p.parentElement;
+            depth++;
+        }
+    } catch (err) {
+        console.error('Error aplicando visual debug al formulario:', err);
+    }
     
-    // Actualizar la barra de progreso
+    // Actualizar la barra de progreso y botones
     updateProgressBar();
-    
-    // Actualizar la visibilidad de los botones de navegación
     updateNavigationButtons();
+    
+    console.log(`Formulario ${index + 1} mostrado`);
 }
 
 /**
@@ -433,132 +665,118 @@ function updateProgressBar() {
     const progressBar = document.getElementById('progress');
     const progressText = document.getElementById('progress-text');
     
-    if (progressBar && progressText && checkInData) {
-        // Calcular el porcentaje de progreso
-        const progress = ((currentGuestIndex + 1) / checkInData.guestsCount) * 100;
+    if (progressBar && guestForms.length > 0) {
+        const progress = ((currentGuestIndex + 1) / guestForms.length) * 100;
         progressBar.style.width = `${progress}%`;
-        
-        // Actualizar el texto de progreso
-        progressText.textContent = window.i18n.getText('progress', {
-            current: currentGuestIndex + 1,
-            total: checkInData.guestsCount
-        });
+    }
+    
+    if (progressText && guestForms.length > 0) {
+        const text = window.i18n.getText('progress')
+            .replace('{current}', currentGuestIndex + 1)
+            .replace('{total}', guestForms.length);
+        progressText.textContent = text;
     }
 }
 
 /**
- * Actualiza la visibilidad de los botones de navegación
+ * Actualiza el estado de los botones de navegación
  */
 function updateNavigationButtons() {
     const prevBtn = document.getElementById('prev-btn');
     const nextBtn = document.getElementById('next-btn');
     const submitBtn = document.getElementById('submit-btn');
     
-    if (prevBtn && nextBtn && submitBtn) {
-        // Mostrar/ocultar el botón anterior
-        if (currentGuestIndex > 0) {
-            prevBtn.classList.remove('hidden');
+    if (prevBtn) {
+        if (currentGuestIndex === 0) {
+            prevBtn.style.display = 'none';
         } else {
-            prevBtn.classList.add('hidden');
+            prevBtn.style.display = 'inline-block';
         }
-        
-        // Mostrar/ocultar los botones siguiente y enviar
-        if (currentGuestIndex < guestForms.length - 1) {
-            nextBtn.classList.remove('hidden');
-            submitBtn.classList.add('hidden');
+    }
+    
+    if (nextBtn && submitBtn) {
+        if (currentGuestIndex === guestForms.length - 1) {
+            nextBtn.style.display = 'none';
+            submitBtn.style.display = 'inline-block';
         } else {
-            nextBtn.classList.add('hidden');
-            submitBtn.classList.remove('hidden');
+            nextBtn.style.display = 'inline-block';
+            submitBtn.style.display = 'none';
         }
     }
 }
 
 /**
  * Valida el formulario actual
- * @returns {boolean} - true si el formulario es válido, false en caso contrario
+ * @returns {boolean} - True si es válido, false si hay errores
  */
 function validateCurrentForm() {
-    console.log(`Validando formulario para huésped ${currentGuestIndex + 1}`);
+    console.log(`Validando formulario ${currentGuestIndex + 1}`);
     
     const currentForm = guestForms[currentGuestIndex];
-    
     if (!currentForm) {
-        console.error(`No se encontró el formulario para el huésped ${currentGuestIndex + 1}`);
+        console.error('No se encontró el formulario actual');
         return false;
     }
     
-    // Obtener todos los campos obligatorios
-    const requiredInputs = currentForm.querySelectorAll('[required]');
-    console.log(`Encontrados ${requiredInputs.length} campos requeridos`);
     let isValid = true;
+    const errors = [];
     
-    // Validar cada campo
-    requiredInputs.forEach((input, index) => {
-        console.log(`Validando campo ${index + 1}: ${input.name || 'sin nombre'} - Valor: ${input.value ? 'tiene valor' : 'vacío'}`);
-        
-        if (!input.value) {
+    // Validar campos obligatorios
+    const requiredFields = [
+        'full-name', 'gender', 'birth-date', 'nationality', 
+        'address', 'municipality', 'postal-code', 'province', 
+        'country', 'phone', 'email', 'document-type', 'document-number'
+    ];
+    
+    requiredFields.forEach(fieldName => {
+        const field = currentForm.querySelector(`[name="${fieldName}"]`);
+        if (field && !field.value.trim()) {
             isValid = false;
-            input.classList.add('border-red-500');
-            console.log(`Campo ${index + 1} inválido: marcado con borde rojo`);
-            
-            // Añadir evento para quitar el estilo de error cuando se modifique el campo
-            input.addEventListener('input', function() {
-                this.classList.remove('border-red-500');
-                console.log(`Estilo de error removido del campo ${index + 1}`);
-            }, { once: true });
-        } else {
-            input.classList.remove('border-red-500');
-            console.log(`Campo ${index + 1} válido`);
+            errors.push(`${fieldName}: ${window.i18n.getText('required_field')}`);
+            field.classList.add('border-red-500');
+        } else if (field) {
+            field.classList.remove('border-red-500');
         }
     });
     
-    // Validar la firma
-    try {
-        console.log('Validando firma...');
-        if (isSignatureEmpty(currentGuestIndex)) {
+    // Validar fecha de nacimiento
+    const birthDateField = currentForm.querySelector('[name="birth-date"]');
+    if (birthDateField && birthDateField.value) {
+        const birthDate = new Date(birthDateField.value);
+        const today = new Date();
+        
+        if (birthDate > today) {
             isValid = false;
-            console.log('Firma vacía detectada');
-            const signaturePad = currentForm.querySelector('.signature-pad');
-            if (signaturePad) {
-                signaturePad.classList.add('border-red-500');
-                console.log('Contenedor de firma marcado con borde rojo');
-                
-                // Añadir evento para quitar el estilo de error cuando se dibuje en el canvas
-                try {
-                    const canvas = signatures[currentGuestIndex].canvas;
-                    canvas.addEventListener('mousedown', function() {
-                        signaturePad.classList.remove('border-red-500');
-                        console.log('Estilo de error removido del contenedor de firma (mousedown)');
-                    }, { once: true });
-                    
-                    canvas.addEventListener('touchstart', function() {
-                        signaturePad.classList.remove('border-red-500');
-                        console.log('Estilo de error removido del contenedor de firma (touchstart)');
-                    }, { once: true });
-                } catch (canvasError) {
-                    console.error('Error al configurar eventos del canvas:', canvasError);
-                }
-            } else {
-                console.error('No se encontró el contenedor de firma (.signature-pad)');
-            }
+            errors.push(`birth-date: ${window.i18n.getText('invalid_date')}`);
+            birthDateField.classList.add('border-red-500');
         } else {
-            console.log('Firma válida');
+            birthDateField.classList.remove('border-red-500');
         }
-    } catch (signatureError) {
-        console.error('Error al validar la firma:', signatureError);
+    }
+    
+    // Validar foto del documento
+    // Note: document photo field removed from the form; skip validation here
+    
+    // Validar firma
+    if (isSignatureEmpty(currentGuestIndex)) {
         isValid = false;
+        errors.push(`signature: ${window.i18n.getText('signature_required')}`);
+        const canvas = signatures[currentGuestIndex];
+        if (canvas) {
+            canvas.classList.add('border-red-500');
+        }
+    } else {
+        const canvas = signatures[currentGuestIndex];
+        if (canvas) {
+            canvas.classList.remove('border-red-500');
+        }
     }
     
     if (!isValid) {
-        console.log('Formulario inválido, mostrando alerta');
-        try {
-            alert(window.i18n.getText('required_field'));
-        } catch (alertError) {
-            console.error('Error al mostrar alerta:', alertError);
-            alert('Por favor, complete todos los campos requeridos');
-        }
+        console.error('Errores de validación:', errors);
+        alert('Por favor, completa todos los campos obligatorios.');
     } else {
-        console.log('Formulario válido completamente');
+        console.log(`Formulario ${currentGuestIndex + 1} válido`);
     }
     
     return isValid;
@@ -568,12 +786,11 @@ function validateCurrentForm() {
  * Muestra el modal de confirmación
  */
 function showConfirmationModal() {
-    console.log('Intentando mostrar el modal de confirmación');
-    const confirmationModal = document.getElementById('confirmation-modal');
+    console.log('Mostrando modal de confirmación');
     
-    if (confirmationModal) {
-        confirmationModal.classList.remove('hidden');
-        console.log('Modal de confirmación mostrado correctamente');
+    const confirmModal = document.getElementById('confirmation-modal');
+    if (confirmModal) {
+        confirmModal.style.display = 'flex';
     } else {
         console.error('No se encontró el modal de confirmación');
     }
@@ -582,130 +799,92 @@ function showConfirmationModal() {
 /**
  * Envía el formulario
  */
-function submitForm() {
-    console.log('Función submitForm iniciada');
-    
-    // Recopilar los datos de todos los formularios
-    const formData = new FormData();
-    
-    // Añadir los datos del check-in
+async function submitForm() {
+    console.log('Enviando formulario');
+
     try {
-        formData.append('apartment', checkInData?.apartment || '');
-        formData.append('checkInDate', checkInData?.checkInDate || '');
-        formData.append('guestsCount', checkInData?.guestsCount || '1');
-        
-        console.log('Datos de check-in añadidos:', {
-            apartment: checkInData?.apartment || '',
-            checkInDate: checkInData?.checkInDate || '',
-            guestsCount: checkInData?.guestsCount || '1'
-        });
-    } catch (error) {
-        console.error('Error al añadir datos de check-in:', error);
-        formData.append('apartment', '');
-        formData.append('checkInDate', '');
-        formData.append('guestsCount', '1');
-    }
-    
-    // Añadir los datos de cada huésped
-    for (let i = 0; i < guestForms.length; i++) {
-        console.log(`Procesando datos del huésped ${i+1}`);
-        const form = guestForms[i];
-        
-        try {
-            // Obtener los campos del formulario
-            const fullName = form.querySelector('[name="full-name"]')?.value || '';
-            const birthDate = form.querySelector('[name="birth-date"]')?.value || '';
-            const nationality = form.querySelector('[name="nationality"]')?.value || '';
-            const address = form.querySelector('[name="address"]')?.value || '';
-            const relationship = form.querySelector('[name="relationship"]')?.value || '';
-            const checkoutDate = form.querySelector('[name="checkout-date"]')?.value || '';
-            const documentType = form.querySelector('[name="document-type"]')?.value || '';
-            const documentNumber = form.querySelector('[name="document-number"]')?.value || '';
-            let documentPhoto = null;
-            
-            try {
-                const photoInput = form.querySelector('[name="document-photo"]');
-                if (photoInput && photoInput.files && photoInput.files.length > 0) {
-                    documentPhoto = photoInput.files[0];
-                    console.log(`Foto del documento obtenida para huésped ${i+1}:`, documentPhoto.name);
-                } else {
-                    console.warn(`No se encontró foto del documento para huésped ${i+1}`);
+        // Recopilar todos los datos del formulario
+        const formData = new FormData();
+
+        // Añadir datos básicos
+        formData.append('apartment', checkInData.apartment);
+        formData.append('checkInDate', checkInData.checkInDate);
+        formData.append('guestsCount', guestForms.length);
+
+        // Recoger promesas para las conversiones asíncronas (canvas.toBlob)
+        const blobPromises = [];
+
+        // Añadir datos de cada huésped
+        guestForms.forEach((form, index) => {
+            console.log(`Recopilando datos del huésped ${index + 1}`);
+
+            // Campos de texto
+            const textFields = [
+                'full-name', 'gender', 'birth-date', 'nationality',
+                'address', 'municipality', 'postal-code', 'province',
+                'country', 'phone', 'email', 'relationship',
+                'document-type', 'document-number'
+            ];
+
+            textFields.forEach(fieldName => {
+                const field = form.querySelector(`[name="${fieldName}"]`);
+                if (field) {
+                    formData.append(`guest_${index}_${fieldName}`, field.value || '');
                 }
-            } catch (photoError) {
-                console.error(`Error al obtener la foto del documento para huésped ${i+1}:`, photoError);
-            }
-            
-            // Añadir los datos al FormData
-            formData.append(`guest_${i}_fullName`, fullName);
-            formData.append(`guest_${i}_birthDate`, birthDate);
-            formData.append(`guest_${i}_nationality`, nationality);
-            formData.append(`guest_${i}_address`, address);
-            formData.append(`guest_${i}_relationship`, relationship);
-            formData.append(`guest_${i}_checkoutDate`, checkoutDate);
-            formData.append(`guest_${i}_documentType`, documentType);
-            formData.append(`guest_${i}_documentNumber`, documentNumber);
-            
-            if (documentPhoto) {
-                formData.append(`guest_${i}_documentPhoto`, documentPhoto);
-            } else {
-                formData.append(`guest_${i}_documentPhoto`, 'no-photo');
-            }
-            
-            // La conversión de la imagen del documento se manejará de forma síncrona más adelante
-            
-            // Convertir la firma a imagen y añadirla al FormData
-            try {
-                if (signatures && signatures[i] && signatures[i].canvas) {
+            });
+
+            // Foto del documento
+            // Document photo field removed: skipping
+
+            // Firma: convertir el canvas a Blob y añadir la promesa para esperar su finalización
+            const canvas = signatures[index];
+            if (canvas) {
+                const p = new Promise((resolve) => {
                     try {
-                        const signatureDataUrl = signatures[i].canvas.toDataURL('image/png');
-                        formData.append(`guest_${i}_signature`, signatureDataUrl);
-                        console.log(`Firma obtenida para huésped ${i+1}`);
-                    } catch (canvasError) {
-                        console.error(`Error al convertir firma a imagen para huésped ${i+1}:`, canvasError);
-                        formData.append(`guest_${i}_signature`, 'error-signature');
+                        canvas.toBlob((blob) => {
+                            if (blob) {
+                                // Añadir Blob al FormData con un nombre de archivo
+                                formData.append(`guest_${index}_signature`, blob, `signature_${index}.png`);
+                            } else {
+                                console.error(`toBlob devolvió null para el canvas ${index}`);
+                            }
+                            resolve();
+                        }, 'image/png');
+                    } catch (e) {
+                        console.error(`Error al convertir el canvas ${index} a Blob:`, e);
+                        resolve();
                     }
-                } else {
-                    console.warn(`No se pudo obtener la firma para huésped ${i+1}`);
-                    formData.append(`guest_${i}_signature`, 'no-signature');
-                }
-            } catch (signatureError) {
-                console.error(`Error al obtener la firma para huésped ${i+1}:`, signatureError);
-                formData.append(`guest_${i}_signature`, 'error-signature');
+                });
+                blobPromises.push(p);
             }
-            
-            console.log(`Datos del huésped ${i+1} añadidos correctamente`);
-        } catch (error) {
-            console.error(`Error al procesar datos del huésped ${i+1}:`, error);
-        }
+        });
+
+        // Esperar a que todas las operaciones asíncronas (toBlob) terminen
+        await Promise.all(blobPromises);
+
+        // Enviar los datos (simulateFormSubmission manejará Blobs adecuadamente)
+        await simulateFormSubmission(formData);
+
+    } catch (error) {
+        console.error('Error al enviar el formulario:', error);
+        alert('Hubo un error al enviar el formulario. Por favor, inténtelo de nuevo.');
+        throw error;
     }
-    
-    // Convertir las imágenes de documentos a base64 antes del envío
-    convertDocumentPhotosToBase64(formData).then(() => {
-        // Simular el envío del formulario
-        simulateFormSubmission(formData);
-    }).catch(error => {
-        console.error('Error al convertir imágenes de documentos:', error);
-        // Continuar con el envío aunque haya errores en las imágenes
-        simulateFormSubmission(formData);
-    });
 }
 
 /**
- * Convierte las imágenes de documentos a base64
+ * Convierte las fotos de documentos a base64
  * @param {FormData} formData - Los datos del formulario
  * @returns {Promise} - Promesa que se resuelve cuando todas las imágenes están convertidas
  */
 function convertDocumentPhotosToBase64(formData) {
     return new Promise((resolve, reject) => {
         const promises = [];
-        const guestForms = document.querySelectorAll('.guest-form');
         
         for (let i = 0; i < guestForms.length; i++) {
-            const photoInput = guestForms[i].querySelector('[name="document-photo"]');
+            const file = formData.get(`guest_${i}_documentPhoto`);
             
-            if (photoInput && photoInput.files && photoInput.files.length > 0) {
-                const file = photoInput.files[0];
-                
+            if (file && file instanceof File) {
                 const promise = new Promise((resolveFile, rejectFile) => {
                     const reader = new FileReader();
                     
@@ -740,86 +919,122 @@ function convertDocumentPhotosToBase64(formData) {
  * Simula el envío del formulario
  * @param {FormData} formData - Los datos del formulario
  */
-import { saveFormToFirestore } from './firebase-config.js';
-
 async function simulateFormSubmission(formData) {
     console.log('Iniciando simulateFormSubmission');
     
-    // Crear un objeto con los datos del formulario
-    const submissionData = {
-        apartment: formData.get('apartment') || '',
-        checkInDate: formData.get('checkInDate') || '',
-        guestsCount: parseInt(formData.get('guestsCount'), 10) || 0,
-        guests: []
-    };
-    
-    console.log('Datos básicos del formulario:', submissionData);
-    
-    // Añadir los datos de cada huésped
-    for (let i = 0; i < guestForms.length; i++) {
-        console.log(`Procesando datos del huésped ${i+1} en simulateFormSubmission`);
+    try {
+        // Importar Firebase y guardar en Firestore
+        const { saveFormToFirestore } = await import('./firebase-config.js');
         
-        // Obtener los datos del FormData
-        const guestData = {
-            fullName: formData.get(`guest_${i}_fullName`) || '',
-            birthDate: formData.get(`guest_${i}_birthDate`) || '',
-            nationality: formData.get(`guest_${i}_nationality`) || '',
-            address: formData.get(`guest_${i}_address`) || '',
-            relationship: formData.get(`guest_${i}_relationship`) || '',
-            checkoutDate: formData.get(`guest_${i}_checkoutDate`) || '',
-            documentType: formData.get(`guest_${i}_documentType`) || '',
-            documentNumber: formData.get(`guest_${i}_documentNumber`) || '',
-            documentPhoto: formData.get(`guest_${i}_documentPhoto`) || 'No disponible',
-            signature: formData.get(`guest_${i}_signature`) || 'No disponible'
+        // Crear un objeto con los datos del formulario
+        const submissionData = {
+            apartment: formData.get('apartment'),
+            checkInDate: formData.get('checkInDate'),
+            guestsCount: parseInt(formData.get('guestsCount'), 10),
+            guests: []
         };
         
-        console.log(`Datos del huésped ${i+1} obtenidos:`, {
-            fullName: guestData.fullName,
-            documentNumber: guestData.documentNumber,
-            signatureObtained: guestData.signature !== 'no-signature' && guestData.signature !== 'error-signature',
-            photoObtained: guestData.documentPhoto !== 'no-photo'
-        });
+        // Validar datos básicos
+        if (!submissionData.apartment || !submissionData.checkInDate || !submissionData.guestsCount) {
+            throw new Error('Faltan datos básicos del formulario');
+        }
         
-        submissionData.guests.push(guestData);
-    }
-    
-    // Añadir fecha y hora de envío e ID único
-    submissionData.id = 'form_' + Date.now();
-    submissionData.submissionDate = new Date().toISOString();
-    
-    console.log('Objeto de envío completo:', {
-        id: submissionData.id,
-        apartment: submissionData.apartment,
-        checkInDate: submissionData.checkInDate,
-        guestsCount: submissionData.guestsCount,
-        guestCount: submissionData.guests.length
-    });
-    
-    try {
-        // Guardar en Firestore
-        const saved = await saveFormToFirestore(submissionData);
-        if (saved) {
+        console.log('Datos básicos del formulario validados:', submissionData);
+        
+        // Añadir los datos de cada huésped
+        for (let i = 0; i < guestForms.length; i++) {
+            console.log(`Procesando datos del huésped ${i+1}`);
+            
+            // Obtener y validar los datos requeridos del huésped
+            const requiredFields = ['full-name', 'birth-date', 'nationality', 'document-type', 'document-number'];
+            const guestData = {};
+            
+            for (const field of requiredFields) {
+                const value = formData.get(`guest_${i}_${field}`);
+                if (!value) {
+                    throw new Error(`Falta el campo requerido ${field} para el huésped ${i+1}`);
+                }
+                guestData[field.replace('-', '')] = value;
+            }
+            
+            // Añadir campos opcionales
+            const optionalFields = [
+                'gender', 'address', 'municipality', 'postal-code', 'province',
+                'country', 'phone', 'email', 'relationship'
+            ];
+            
+            for (const field of optionalFields) {
+                const value = formData.get(`guest_${i}_${field}`);
+                if (value) {
+                    guestData[field.replace('-', '')] = value;
+                }
+            }
+            
+            // Validar firma (document photo is optional)
+            const signature = formData.get(`guest_${i}_signature`);
+            if (!signature) {
+                throw new Error(`Falta la firma para el huésped ${i+1}`);
+            }
+            guestData.signature = signature;
+
+            // Document photo is optional. If provided, include it; otherwise skip.
+            const docPhoto = formData.get(`guest_${i}_documentPhoto`);
+            if (docPhoto) {
+                guestData.documentPhoto = docPhoto;
+            }
+            
+            submissionData.guests.push(guestData);
+            console.log(`Datos del huésped ${i+1} validados y añadidos`);
+        }
+        
+        // Validar que haya al menos un huésped
+        if (submissionData.guests.length === 0) {
+            throw new Error('No hay datos de huéspedes para guardar');
+        }
+        
+        // Intentar guardar en Firestore
+        console.log('Intentando guardar en Firestore...');
+        let success = false;
+        // During tests we may want to skip actual Firestore writes
+        if (typeof window !== 'undefined' && window.__TEST_MODE) {
+            console.log('TEST MODE: Skipping Firestore write');
+            success = true;
+        } else {
+            const save = await saveFormToFirestore(submissionData);
+            success = save;
+        }
+        
+        if (success) {
             console.log('Datos guardados exitosamente en Firestore');
             
             // Limpiar los datos de localStorage
             localStorage.removeItem('checkInData');
             
-            // Mostrar el modal de éxito
-            setTimeout(() => {
-                const successModal = document.getElementById('success-modal');
-                if (successModal) {
-                    successModal.classList.remove('hidden');
-                    console.log('Modal de éxito mostrado');
-                } else {
-                    console.error('No se encontró el modal de éxito');
-                }
-            }, 1500);
+            // Mostrar modal de éxito
+            const successModal = document.getElementById('success-modal');
+            if (successModal) {
+                successModal.style.display = 'flex';
+                console.log('Modal de éxito mostrado');
+            } else {
+                console.error('No se encontró el modal de éxito');
+                alert('Formulario enviado con éxito');
+            }
         } else {
-            throw new Error('No se pudo guardar en Firestore');
+            throw new Error('No se pudo guardar el formulario en Firestore');
         }
     } catch (error) {
-        console.error('Error al guardar el formulario:', error);
-        alert('Hubo un error al guardar los datos. Por favor, inténtelo de nuevo.');
+        console.error('Error al procesar o guardar el formulario:', error);
+        
+        // Mostrar mensaje de error específico al usuario
+        let errorMessage = 'Hubo un error al guardar los datos. ';
+        if (error.message.includes('Falta')) {
+            errorMessage += error.message;
+        } else {
+            errorMessage += 'Por favor, verifique los datos e inténtelo de nuevo.';
+        }
+        
+        alert(errorMessage);
+        throw error; // Propagar el error para manejo adicional si es necesario
     }
 }
 

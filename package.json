@@ -1,0 +1,17 @@
+{
+  "name": "datosairbnb-tests",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "test": "node tools/run-tests.js",
+    "test:unit": "vitest",
+    "test:unit:watch": "vitest --watch",
+    "test:e2e": "playwright test",
+    "test:all": "npm run test:unit && npm run test:e2e"
+  },
+  "devDependencies": {
+    "vitest": "^1.0.0",
+    "jsdom": "^21.0.0",
+    "@playwright/test": "^1.40.0"
+  }
+}
