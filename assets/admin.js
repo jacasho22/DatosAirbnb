@@ -14,25 +14,38 @@ const ADMIN_PASSWORD = 'balcones22';
 let formSubmissions = [];
 let filteredSubmissions = [];
 
-document.addEventListener('DOMContentLoaded', async () => {
-    try {
-        console.log('Iniciando carga de datos...');
-        // Configurar el formulario de login
-        setupLoginForm();
-        
-        // Configurar los botones y eventos del panel de administración
-        setupAdminPanel();
-        
-        // Configurar el modal de detalles
-        setupDetailsModal();
-        
-        // Cargar los datos de formularios enviados desde Firestore
-        await loadFormSubmissions();
-        console.log('Datos cargados exitosamente');
-    } catch (error) {
-        console.error('Error al cargar los datos:', error);
+// Defensive guard: only initialize admin behaviors when the admin UI is present.
+// This prevents admin code from running on the public pages (e.g. index.html)
+// which previously caused "Error al cargar los formularios..." alerts.
+try {
+    const adminPanelExists = typeof document !== 'undefined' && document.getElementById && document.getElementById('admin-panel');
+    if (adminPanelExists) {
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                console.log('Iniciando carga de datos...');
+                // Configurar el formulario de login
+                setupLoginForm();
+                
+                // Configurar los botones y eventos del panel de administración
+                setupAdminPanel();
+                
+                // Configurar el modal de detalles
+                setupDetailsModal();
+                
+                // Cargar los datos de formularios enviados desde Firestore
+                await loadFormSubmissions();
+                console.log('Datos cargados exitosamente');
+            } catch (error) {
+                console.error('Error al cargar los datos:', error);
+            }
+        });
+    } else {
+        console.log('admin.js: admin panel not present — initialization skipped');
     }
-});
+} catch (e) {
+    // If document isn't available (server-side), skip initialization silently
+    console.log('admin.js: initialization guard failed, skipping admin init');
+}
 
 /**
  * Carga los formularios desde Firestore
