@@ -109,8 +109,34 @@ async function loadFormSubmissions() {
         applyFilters();
     } catch (error) {
         console.error('Error al cargar los formularios:', error);
-        alert('Error al cargar los formularios. Por favor, recarga la página.');
-        throw error;
+        // Replace blocking alert with a non-blocking banner inside the admin UI (if present)
+        try {
+            const adminPanel = document.getElementById('admin-panel');
+            if (adminPanel) {
+                const bannerId = 'admin-error-banner';
+                let banner = document.getElementById(bannerId);
+                const message = 'Error al cargar los formularios. Por favor, recarga la página o comprueba la configuración de Firebase.';
+                if (!banner) {
+                    banner = document.createElement('div');
+                    banner.id = bannerId;
+                    banner.className = 'bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4';
+                    banner.style.marginBottom = '1rem';
+                    banner.textContent = message;
+                    // Insert banner at top of admin panel
+                    adminPanel.insertBefore(banner, adminPanel.firstChild);
+                } else {
+                    banner.textContent = message;
+                    banner.style.display = 'block';
+                }
+            } else {
+                // If adminPanel isn't present, just log the message to console (no alert)
+                console.warn('Admin panel not present to show error banner');
+            }
+        } catch (uiErr) {
+            console.error('Error mostrando banner de error en admin UI:', uiErr);
+        }
+        // Do not rethrow to avoid an alert or unhandled rejection bubbling up
+        return;
     }
 }
 
